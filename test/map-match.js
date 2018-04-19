@@ -58,4 +58,11 @@ describe("mapMatch", function() {
             value: 2
         });
     });
+    
+    it("should handle identity maps", function() {
+        assert.deepEqual(mapMatch(["a", null, "a"], "*", {}, {a: 2}), {
+            key: "a",
+            value: 2
+        })
+    })
 });

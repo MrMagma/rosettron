@@ -9,6 +9,13 @@ let {errif} = require("./util.js");
   * @returns {Object} The key and value to put into the output
   */
 function mapMatch([matchedKey, util, keymapKey], mapToKey, fns, input) {
+    if (mapToKey === "*") {
+        return {
+            key: matchedKey,
+            value: input[matchedKey]
+        }
+    }
+    
     let params = [matchedKey, input[matchedKey]];
     let out = {
         key: null,
