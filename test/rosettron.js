@@ -221,4 +221,135 @@ describe("rosettron", function() {
             }]
         }));
     });
+    
+    it("should handle function key-value mappers", function() {
+        assert.deepEqual({
+            b: 3
+        }, rosettron({
+            a: "f()"
+        }, {
+            a: 2
+        }, {
+            f(key, value) {
+                return {
+                    key: "b",
+                    value: value + 1
+                };
+            }
+        }));
+    });
+    
+    it("should handle key mappers", function() {
+        assert.deepEqual({
+            b: 2
+        }, rosettron({
+            a: "f()"
+        }, {
+            a: 2
+        }, {
+            f(key, value) {
+                return {
+                    key: "b"
+                };
+            }
+        }));
+    });
+    
+    it("should handle function key-value mappers that return complex keys", function() {
+        assert.deepEqual({
+            b: 3
+        }, rosettron({
+            a: {
+                c: "f()"
+            }
+        }, {
+            a: {
+                c: 2
+            }
+        }, {
+            f(key, value) {
+                return {
+                    key: "..b",
+                    value: value + 1
+                };
+            }
+        }));
+        
+        assert.deepEqual({
+            a: [{a0: 0}, {a1: 1}, {a2: 2}]
+        }, rosettron({
+            a: [{
+                a: "f()"
+            }]
+        }, {
+            a: [{a: 1}, {a: 2}, {a: 3}]
+        }, {
+            f(key, value) {
+                return {
+                    key: "a%",
+                    value: value - 1
+                };
+            }
+        }));
+    });
+    
+    it("should handle key-value mappers in arrays", function() {
+        assert.deepEqual({
+            a: [0, 1, 2]
+        }, rosettron({
+            a: ["f()"]
+        }, {
+            a: [1, 2, 3]
+        }, {
+            f(key, value) {
+                return {
+                    key: "%",
+                    value: value - 1
+                };
+            }
+        }));
+        
+        assert.deepEqual({
+            a0: 0,
+            a1: 1,
+            a2: 2
+        }, rosettron({
+            a: ["f()"]
+        }, {
+            a: [1, 2, 3]
+        }, {
+            f(key, value) {
+                return {
+                    key: "..a%",
+                    value: value - 1
+                };
+            }
+        }));
+    });
+    
+    it("should handle function matchers", function() {
+        assert.deepEqual({
+            ab: 0,
+            a1: 2,
+            ac: 5
+        }, rosettron({
+            "f()": "g()"
+        }, {
+            ab: 0,
+            b: 1,
+            a1: 2,
+            df: 3,
+            gdf: 4,
+            ac: 5
+        }, {
+            f(key) {
+                return [key[0] === "a"]
+            },
+            g(key) {
+                return {
+                    key: key
+                };
+            }
+        }))
+    });
 });

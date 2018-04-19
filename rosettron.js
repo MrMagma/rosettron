@@ -36,6 +36,8 @@ Translator example
 }
 */
 let parseKey = require("./parse-key.js");
+let makeMatcher = require("./make-matcher.js");
+let mapMatch = require("./map-match.js");
 let {errif} = require("./util.js");
 
 /**
@@ -59,20 +61,11 @@ function flattenOnce(arr) {
   * @param {Array} inputKeys - List of keys from the input object
   * @returns {[string, RegExp|, string]} The matched key, some utility data, and the original key
   */
-function getMatches(key, inputKeys) {
-    if (key[0] === "/") {
-        let regex = new RegExp(
-            key.slice(1, key.lastIndexOf("/")),
-            key.slice(key.lastIndexOf("/") + 1, Infinity)
-        );
-        
-        return inputKeys
-            .filter(inputKey => regex.test(inputKey))
-            .map(inputKey => [inputKey, regex, key]);
-    } else {
-        return [[inputKeys[inputKeys.indexOf(key)], null, key]]
-            .filter(match => (match[0] != null));
-    }
+function getMatches(key, inputKeys, fns) {
+    return inputKeys
+        .map(makeMatcher(key, fns))
+        .filter(([matched]) => matched)
+        .map(([_, matchedKey, data]) => [matchedKey, data, key]);
 }
 
 /*
@@ -93,16 +86,16 @@ function accessKey(key, {stack}) {
     
     let stackIndex = stack.length - 1;
     let out = stack[stackIndex];
-    
+
     while (outKey.length > 1) {
         let token = outKey.shift();
-        
+
         switch (token.type) {
             case "Elevator":
                 stackIndex--;
-                
+
                 errif(stackIndex < 0, "Cannot go up any more layers");
-                
+
                 out = stack[stackIndex];
                 break;
             case "Key":
@@ -114,7 +107,7 @@ function accessKey(key, {stack}) {
                         out[token.identifier] = [];
                     }
                 }
-                
+
                 out = out[token.identifier];
         }
     }
@@ -130,20 +123,14 @@ function accessKey(key, {stack}) {
   * @param {RegExp|function} [util] - A parameter for when we need to do something special with the key
   * @returns {string} The specified key
   */
-function specifyKey(key, counterStack, matchedKey = "", util) {
-    if (util != null && util instanceof RegExp) {
-        key = matchedKey.replace(util, key);
-    }
-    
-    key = key.replace(/%([0-9]*)/g, (_, i) => {
+function specifyKey(key, counterStack) {
+    return key.replace(/%([0-9]*)/g, (_, i) => {
         if (i.length) {
             return counterStack[parseInt(i)];
         } else {
             return counterStack[counterStack.length - 1];
         }
     });
-    
-    return key;
 }
 
 /**
@@ -154,8 +141,8 @@ function specifyKey(key, counterStack, matchedKey = "", util) {
   * @param {Object} data - The stack and counter stack
   * @param {string} matchedKey - The key that was matched in the input
   */
-function setMatch(mapToKey, util, value, data, matchedKey = "") {
-    let key = specifyKey(mapToKey, data.counterStack, matchedKey, util);
+function setMatch({key: mapToKey, value}, data) {
+    let key = specifyKey(mapToKey, data.counterStack);
     
     let [obj, keyToken] = accessKey(key, data);
     
@@ -171,15 +158,15 @@ function setMatch(mapToKey, util, value, data, matchedKey = "") {
   * @param {Object} data - The stack and counter stack
   * @returns {Object} The mapped object
   */
-function rosettronObject(keymap, input, data) {    
+function rosettronObject(keymap, input, fns, data) {    
     let inputKeys = Object.keys(input);
     
     // [[matchedKey, util, keymapKey]]
-    let matches = flattenOnce(Object.keys(keymap).map(key => getMatches(key, inputKeys)));
+    let matches = flattenOnce(Object.keys(keymap).map(key => getMatches(key, inputKeys, fns)));
     
     for (let match of matches) {
         if (typeof keymap[match[2]] === "string") {
-            setMatch(keymap[match[2]], match[1], input[match[0]], data, match[0]);
+            setMatch(mapMatch(match, keymap[match[2]], fns, input), data);
         } else {
             errif(data.stack[data.stack.length - 1][match[0]] != null, "Don't assign two things to the same key");
             
@@ -195,7 +182,7 @@ function rosettronObject(keymap, input, data) {
             
             data.stack.push(data.stack[data.stack.length - 1][match[0]]);
             
-            rosettron(keymap[match[2]], input[match[0]], data);
+            rosettron(keymap[match[2]], input[match[0]], fns, data);
             
             // Make sure we aren't dumping something into the output that we shouldn't be
             if (!Object.keys(data.stack[data.stack.length - 1]).length && canDelete) {
@@ -216,7 +203,7 @@ function rosettronObject(keymap, input, data) {
   * @param {Object} data - The stack and counter stack
   * @returns {Object} The mapped array
   */
-function rosettronArray(keymap, input, data) {
+function rosettronArray(keymap, input, fns, data) {
     errif(keymap.length !== 1, "Must provide one and only one element in keymap array");
     errif(typeof keymap[0] !== "string" && typeof keymap[0] !== "object", "Array keymap must be string, object, or array");
     
@@ -230,11 +217,11 @@ function rosettronArray(keymap, input, data) {
     
     for (; counterStack[lastInd] < input.length; ++counterStack[lastInd]) {
         if (typeof rule === "string") {
-            setMatch(rule, null, input[counterStack[lastInd]], data);
+            setMatch(mapMatch([counterStack[lastInd], null, 0], rule, fns, input), data);
         } else {
             let out = {};
             stack.push(out);
-            rosettron(rule, input[counterStack[lastInd]], data);
+            rosettron(rule, input[counterStack[lastInd]], fns, data);
             stack.pop();
             if (Object.keys(out).length) stack[stack.length - 1][counterStack[lastInd]] = out;
         }
@@ -249,20 +236,22 @@ function rosettronArray(keymap, input, data) {
   * Takes in an object or array and a keymap, which it uses to map the input data onto a new schema
   * @param {Object} keymap - An object containing the rules for mapping from input to output
   * @param {Object} input - The input data
+  * @param {Object} [fns={}] - A list of named functions to use in the keymap
   * @param {Object} [data={stack: [{}], counterStack: []}] data - Object containing the stack and counter stack. Used internally; external use not recommended
   * @returns {Object} The mapped object
   */
-function rosettron(keymap, input, data = {stack: [], counterStack: []}) {
+function rosettron(keymap, input, fns = {}, data = {stack: [], counterStack: []}) {
     errif(typeof input !== "object", "input must be an object or array");
     errif(typeof keymap !== "object", "keymap must be an object or array");
+    errif(fns.constructor !== Object, "function list must be an object")
     errif(input.constructor !== keymap.constructor, "keymap and input must be the same type");
     
     if (input instanceof Array) {
         if (!data.stack.length) data.stack[0] = [];
-        return rosettronArray(keymap, input, data);
+        return rosettronArray(keymap, input, fns, data);
     } else {
         if (!data.stack.length) data.stack[0] = {};
-        return rosettronObject(keymap, input, data);
+        return rosettronObject(keymap, input, fns, data);
     }
 }
 
